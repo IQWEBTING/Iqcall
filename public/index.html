@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>IQ Call</title>
+</head>
+<body>
+  <h2>📞 โทรหาเพื่อน</h2>
+  <input id="room" placeholder="รหัสห้อง เช่น 1234" />
+  <button id="join">เข้าห้อง</button>
+  <br><br>
+  <video id="local" autoplay playsinline muted></video>
+  <video id="remote" autoplay playsinline></video>
+
+  <script>
+    const roomInput = document.getElementById("room");
+    const joinBtn = document.getElementById("join");
+    const local = document.getElementById("local");
+    const remote = document.getElementById("remote");
+
+    let ws, pc;
+
+    joinBtn.onclick = async () => {
+      const room = roomInput.value.trim();
+      if (!room) return alert("ใส่รหัสห้องก่อน");
+
+      ws = new WebSocket("wss://" + window.location.host);
+      ws.onopen = () => ws.send(JSON.stringify({ type: "join", room }));
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "ready") startCall(room);
+        if (data.type === "signal") {
+          await pc.setRemoteDescription(data.payload);
+          if (data.payload.type === "offer") {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ws.send(JSON.stringify({ type: "signal", room, payload: answer }));
+          }
+        }
+      };
+    };
+
+    async function startCall(room) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240 },
+        audio: { noiseSuppression: true, echoCancellation: true }
+      });
+      local.srcObject = stream;
+
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      pc.ontrack = (e) => (remote.srcObject = e.streams[0]);
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate)
+          ws.send(
+            JSON.stringify({
+              type: "signal",
+              room,
+              payload: { type: "candidate", candidate: e.candidate },
+            })
+          );
+      };
+
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: 1,
+        offerToReceiveVideo: 1,
+      });
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: "signal", room, payload: offer }));
+    }
+  </script>
+</body>
+</html>
