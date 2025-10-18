@@ -1,28 +1,78 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>IQ Call</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 20px;
+      background: #1e1e1e;
+      color: white;
+    }
+    input, button {
+      font-size: 18px;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    #local, #remote {
+      width: 45%;
+      margin: 10px;
+      border-radius: 10px;
+      background: black;
+    }
+    #loading {
+      display: none;
+      margin-top: 20px;
+      font-size: 20px;
+    }
+    .spinner {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #4caf50;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
   <h2>📞 โทรหาเพื่อน</h2>
   <input id="room" placeholder="รหัสห้อง เช่น 1234" />
-  <button id="join">เข้าห้อง</button>
-  <br><br>
-  <video id="local" autoplay playsinline muted></video>
-  <video id="remote" autoplay playsinline></video>
+  <br>
+  <button id="join">โทรเลย</button>
+
+  <div id="loading"><div class="spinner"></div>กำลังเชื่อมต่อ...</div>
+
+  <div>
+    <video id="local" autoplay playsinline muted></video>
+    <video id="remote" autoplay playsinline></video>
+  </div>
 
   <script>
     const roomInput = document.getElementById("room");
     const joinBtn = document.getElementById("join");
     const local = document.getElementById("local");
     const remote = document.getElementById("remote");
+    const loading = document.getElementById("loading");
 
     let ws, pc;
 
     joinBtn.onclick = async () => {
       const room = roomInput.value.trim();
-      if (!room) return alert("ใส่รหัสห้องก่อน");
+      if (!room) return alert("กรอกห้องก่อน");
+
+      // ป้องกันกดซ้ำ
+      joinBtn.disabled = true;
+      loading.style.display = "block";
 
       ws = new WebSocket("wss://" + window.location.host);
       ws.onopen = () => ws.send(JSON.stringify({ type: "join", room }));
@@ -30,11 +80,67 @@
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
 
-        if (data.type === "ready") startCall(room);
+        if (data.type === "ready") {
+          startCall(room);
+        }
         if (data.type === "signal") {
-          await pc.setRemoteDescription(data.payload);
-          if (data.payload.type === "offer") {
-            const answer = await pc.createAnswer();
+          if (!pc) return;
+          try {
+            await pc.setRemoteDescription(data.payload);
+            if (data.payload.type === "offer") {
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              ws.send(JSON.stringify({ type: "signal", room, payload: answer }));
+            }
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      };
+
+      ws.onerror = () => {
+        alert("เชื่อมต่อ WebSocket ล้มเหลว");
+        joinBtn.disabled = false;
+        loading.style.display = "none";
+      };
+    };
+
+    async function startCall(room) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240 },
+          audio: { noiseSuppression: true, echoCancellation: true }
+        });
+        local.srcObject = stream;
+
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        pc.ontrack = e => remote.srcObject = e.streams[0];
+
+        pc.onicecandidate = e => {
+          if (e.candidate)
+            ws.send(JSON.stringify({ type: "signal", room, payload: { type:"candidate", candidate: e.candidate } }));
+        };
+
+        const offer = await pc.createOffer({ offerToReceiveAudio:1, offerToReceiveVideo:1 });
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: "signal", room, payload: offer }));
+
+        // เมื่อเริ่ม call ปิด loading
+        loading.style.display = "none";
+      } catch(err) {
+        console.error(err);
+        alert("ไม่สามารถเข้ากล้อง/ไมค์ได้");
+        joinBtn.disabled = false;
+        loading.style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>            const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "signal", room, payload: answer }));
           }
