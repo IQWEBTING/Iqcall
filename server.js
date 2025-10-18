@@ -1,10 +1,8 @@
-import express from "express";
-import { WebSocketServer } from "ws";
-import http from "http";
-import path from "path";
-import { fileURLToPath } from "url";
+const express = require("express");
+const { WebSocketServer } = require("ws");
+const http = require("http");
+const path = require("path");
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -35,6 +33,20 @@ wss.on("connection", (ws) => {
     }
 
     if (type === "signal") {
+      rooms[room]?.forEach((client) => {
+        if (client !== ws)
+          client.send(JSON.stringify({ type: "signal", payload }));
+      });
+    }
+
+    ws.on("close", () => {
+      rooms[room] = rooms[room]?.filter((c) => c !== ws);
+    });
+  });
+});
+
+const port = process.env.PORT || 3000;
+server.listen(port, () => console.log("✅ Server running on port " + port));    if (type === "signal") {
       rooms[room]?.forEach((client) => {
         if (client !== ws)
           client.send(JSON.stringify({ type: "signal", payload }));
